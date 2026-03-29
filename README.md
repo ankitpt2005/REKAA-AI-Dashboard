@@ -18,4 +18,4 @@
 ## 🚀 How to Run Locally
 1. Clone the repository:
    ```bash
-   git clone [https://github.com/ankitpt2005/REKAA-Dashboard.git](https://github.com/ankitpt2005/REKAA-Dashboard.git)
+   git clone [https://github.com/your-username/REKAA-Dashboard.git](https://github.com/your-username/REKAA-Dashboard.git)

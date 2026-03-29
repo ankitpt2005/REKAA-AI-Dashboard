@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>REKAA - AI Medical Dashboard</title>
+    
+    <script type="importmap">
+      {
+        "imports": {
+          "@google/generative-ai": "https://esm.run/@google/generative-ai"
+        }
+      }
+    </script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #08090a;
+            background-image: radial-gradient(circle at 50% 50%, #111418 0%, #08090a 100%);
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex; height: 100vh; padding: 15px; gap: 15px; overflow: hidden;
+        }
+        .panel {
+            background: rgba(26, 27, 30, 0.8); backdrop-filter: blur(12px);
+            border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        }
+        .left-panel { width: 25%; }
+        .center-panel { width: 45%; background: radial-gradient(circle at center, #1a1c23 0%, #0d0e12 100%); border: 1px solid rgba(74, 144, 226, 0.2); position: relative; border-radius: 16px; overflow: hidden; }
+        .right-panel { width: 30%; }
+
+        h3 { font-size: 1rem; color: #fff; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+        
+        /* MIC BUTTON */
+        .mic-btn {
+            background: linear-gradient(135deg, #d4ff70 0%, #a8cc50 100%); color: #111;
+            border: none; padding: 15px; border-radius: 12px; font-weight: 700; font-size: 1rem;
+            cursor: pointer; transition: 0.3s; box-shadow: 0 4px 15px rgba(212, 255, 112, 0.3);
+        }
+        .mic-btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
+        
+        .status-box { background: rgba(0, 0, 0, 0.4); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); font-size: 0.85rem; }
+        
+        .transcript-box {
+            flex-grow: 1; background: #0b0c0e; border-radius: 12px; padding: 15px;
+            font-family: 'Courier New', monospace; font-size: 0.85rem; color: #a0aab5;
+            overflow-y: auto; border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        /* PRINTER SECTION */
+        .printer-container {
+            height: 180px; background: #111; border-radius: 12px; position: relative; overflow: hidden; border: 1px solid #333;
+        }
+        .slip {
+            width: 85%; background: #fff; color: #000; padding: 12px; border-radius: 0 0 5px 5px;
+            position: absolute; left: 7.5%; transform: translateY(-105%); transition: transform 2s ease;
+            font-family: 'Courier New', monospace; box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+        }
+        .slip.printing { transform: translateY(0); }
+        .slip-header { border-bottom: 1px dashed #000; text-align: center; font-weight: bold; margin-bottom: 5px; font-size: 0.8rem;}
+
+        /* GOOGLE MAP STYLE 2D SECTION */
+        .map-container {
+            flex-grow: 1; background: #f1f3f4; border-radius: 12px; border: 2px solid #4a90e2;
+            padding: 5px; position: relative; display: flex; flex-direction: column; overflow: hidden;
+        }
+        #hospital-map { width: 100%; height: 100%; background: #e8eaed; border-radius: 8px; }
+        .map-legend { position: absolute; bottom: 10px; right: 10px; background: white; padding: 5px; border-radius: 5px; color: #333; font-size: 0.6rem; border: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+
+    <div class="panel left-panel">
+        <h3>Stream Input</h3>
+        <button class="mic-btn" id="mic-btn">Tap to Speak</button>
+        <div class="status-box" id="status-box">
+            <p><strong>Status:</strong> Ready</p>
+        </div>
+        <div class="transcript-box" id="transcript-box">Welcome. Speak your symptoms...</div>
+    </div>
+
+    <div class="panel center-panel" id="3d-avatar-container"></div>
+
+    <div class="panel right-panel">
+        <h3>Medical Slip</h3>
+        <div class="printer-container">
+            <div class="slip" id="patient-slip">
+                <div class="slip-header">REKAA HOSPITAL</div>
+                <div style="font-size: 0.7rem;">
+                    <b>TOKEN:</b> <span id="slip-token">---</span><br>
+                    <b>DEPT:</b> <span id="slip-dept">---</span><br>
+                    <b>ROOM:</b> <span id="slip-room">---</span>
+                </div>
+                <center><img src="https://api.qrserver.com/v1/create-qr-code/?size=40x40&data=REKAA" width="40" style="margin-top:5px;"></center>
+            </div>
+        </div>
+
+        <h3>Indoor Navigator</h3>
+        <div class="map-container">
+            <canvas id="hospital-map"></canvas>
+            <div class="map-legend">🔴 You | 🔵 Target</div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+      
+    <script src="voiceEngine.js"></script>
+
+    <script>
+        // === 1. 3D AVATAR (CENTER) ===
+        const avCont = document.getElementById('3d-avatar-container');
+        const avScene = new THREE.Scene();
+        const avCam = new THREE.PerspectiveCamera(45, avCont.clientWidth/avCont.clientHeight, 0.1, 1000);
+        const avRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        avRenderer.setSize(avCont.clientWidth, avCont.clientHeight);
+        avCont.appendChild(avRenderer.domElement);
+        avScene.add(new THREE.AmbientLight(0xffffff, 1.2));
+        avCam.position.z = 4.5;
+
+        let avatarMesh, isSpeaking = false;
+        new THREE.GLTFLoader().load('Meshy_AI_A_highly_detailed_3D__0329142719_texture.glb', (gltf) => {
+            avatarMesh = gltf.scene;
+            avatarMesh.scale.set(1.5, 1.5, 1.5);
+            avatarMesh.position.set(0, -1, 0);
+            avScene.add(avatarMesh);
+        });
+
+        // === 2. GOOGLE MAPS STYLE 2D CANVAS (RIGHT) ===
+        const canvas = document.getElementById('hospital-map');
+        const ctx = canvas.getContext('2d');
+        
+        function drawMap(targetRoom = null) {
+            const w = canvas.width = canvas.offsetWidth;
+            const h = canvas.height = canvas.offsetHeight;
+            
+            ctx.clearRect(0,0,w,h);
+            
+            // Draw Corridors (Google Maps Style Grey)
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(w*0.1, h*0.4, w*0.8, h*0.2); // Main Hall
+            ctx.fillRect(w*0.45, h*0.1, w*0.1, h*0.8); // Vertical Corridor
+
+            // Room Layouts
+            const rooms = [
+                { name: 'Emergency', x: w*0.1, y: h*0.1, w: w*0.3, h: h*0.25, color: '#f8d7da' },
+                { name: 'OPD 1', x: w*0.6, y: h*0.1, w: w*0.3, h: h*0.25, color: '#cfe2ff' },
+                { name: 'Pharmacy', x: w*0.1, y: h*0.65, w: w*0.3, h: h*0.25, color: '#d1e7dd' },
+                { name: 'Reception', x: w*0.6, y: h*0.65, w: w*0.3, h: h*0.25, color: '#fff3cd' }
+            ];
+
+            rooms.forEach(r => {
+                ctx.fillStyle = r.color;
+                ctx.strokeStyle = "#bdc1c6";
+                ctx.lineWidth = 2;
+                ctx.strokeRect(r.x, r.y, r.w, r.h);
+                ctx.fillRect(r.x, r.y, r.w, r.h);
+                
+                ctx.fillStyle = "#3c4043";
+                ctx.font = "bold 10px Segoe UI";
+                ctx.fillText(r.name, r.x + 5, r.y + 15);
+            });
+
+            // "You Are Here" Marker
+            ctx.fillStyle = "red";
+            ctx.beginPath(); ctx.arc(w*0.5, h*0.9, 5, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = "black"; ctx.fillText("You", w*0.48, h*0.98);
+
+            // Draw Path if target selected
+            if (targetRoom) {
+                ctx.setLineDash([5, 5]);
+                ctx.strokeStyle = "#4285f4"; // Google Blue
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(w*0.5, h*0.9); // Start at You
+                ctx.lineTo(w*0.5, h*0.5); // Move to Hall
+                
+                let target = rooms.find(rm => rm.name.includes(targetRoom));
+                if(target) {
+                    ctx.lineTo(target.x + target.w/2, h*0.5);
+                    ctx.lineTo(target.x + target.w/2, target.y + target.h/2);
+                    ctx.stroke();
+                    
+                    // Destination Marker
+                    ctx.setLineDash([]);
+                    ctx.fillStyle = "#4285f4";
+                    ctx.beginPath(); ctx.arc(target.x + target.w/2, target.y + target.h/2, 6, 0, Math.PI*2); ctx.fill();
+                }
+            }
+        }
+        window.onload = () => drawMap();
+
+        // === 3. INTERACTION & VOICE ===
+        const micBtn = document.getElementById('mic-btn');
+        const transcript = document.getElementById('transcript-box');
+        const slip = document.getElementById('patient-slip');
+
+        function rekaaSpeak(text, lang = 'en-IN') {
+            window.speechSynthesis.cancel();
+            const utt = new SpeechSynthesisUtterance(text);
+            utt.lang = lang;
+            utt.onstart = () => isSpeaking = true;
+            utt.onend = () => isSpeaking = false;
+            window.speechSynthesis.speak(utt);
+        }
+
+        function handleInput(text) {
+            // Text ko lowercase mein convert kar lo
+            let lowerText = text.toLowerCase();
+            
+            // Hindi detect karne ke keywords
+            let isHindi = lowerText.includes("dard") || lowerText.includes("hai") || lowerText.includes("bukhar") || lowerText.includes("chot");
+            
+            // Emergency detect karne ke liye strong keywords ka array
+            const emergencyKeywords = [
+                "emergency", "chest", "heart", "accident", "bleeding", "breath", 
+                "faint", "unconscious", "stroke", "severe", "crash", "chot", 
+                "khoon", "behosh", "saans", "attack", "critical", "blood"
+            ];
+            
+            // Check agar user ki baat mein koi bhi emergency keyword hai
+            let isEmerg = emergencyKeywords.some(keyword => lowerText.includes(keyword));
+            
+            let targetDept = isEmerg ? "Emergency" : "OPD 1";
+            
+            // Update Slip
+            document.getElementById('slip-token').innerText = isEmerg ? "E-101" : "OPD-42";
+            document.getElementById('slip-dept').innerText = targetDept;
+            document.getElementById('slip-room').innerText = isEmerg ? "Ground Floor - Room A" : "First Floor - Room 105";
+            
+            // Slip animation ko wapas trigger karne ke liye
+            slip.classList.remove('printing');
+            void slip.offsetWidth; // Trigger reflow
+            slip.classList.add('printing');
+            
+            // Generate Map Path
+            drawMap(isEmerg ? "Emergency" : "OPD 1");
+
+            let resp = isHindi 
+                ? `${targetDept} का पर्चा तैयार है। मैप देखिये।` 
+                : `Your ${targetDept} slip is ready. Follow the blue path on the map.`;
+                
+            transcript.innerHTML += `<br><br><b style="color:#4a90e2">REKAA:</b> "${resp}"`;
+            
+            // Transcript box ko hamesha niche scroll karne ke liye
+            transcript.scrollTop = transcript.scrollHeight;
+            
+            rekaaSpeak(resp, isHindi ? 'hi-IN' : 'en-IN');
+        }
+
+        const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const rec = new Speech();
+        rec.lang = 'en-IN';
+        micBtn.onclick = () => { rec.start(); micBtn.innerText = "Listening..."; };
+        rec.onresult = (e) => {
+            const val = e.results[0][0].transcript;
+            micBtn.innerText = "Tap to Speak";
+            transcript.innerHTML += `<br><br><b>Patient:</b> "${val}"`;
+            handleInput(val);
+        };
+
+        // === 4. ANIMATION LOOP ===
+        function animate() {
+            requestAnimationFrame(animate);
+            if (avatarMesh) {
+                avatarMesh.position.y = -1 + Math.sin(Date.now() * 0.002) * 0.01;
+                avatarMesh.scale.y = isSpeaking ? 1.5 + (Math.random()*0.05) : 1.5;
+            }
+            avRenderer.render(avScene, avCam);
+        }
+        animate();
+    </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Sensitive Data (Security)
+.env
+config.js
+
+# OS related files
+.DS_Store
+Thumbs.db
+
+# VS Code & IDE settings
+.vscode/
+.idea/
+
+# Local server / Temp files
+node_modules/
+dist/
+*.log
